@@ -90,6 +90,21 @@ Each states what it assumed where it had to assume:
   travels with the numbers.
 - `air_density` returns `rho` with pressure and `rho_no_pressure` without.
 
+A worked example, because the answer is not the one people expect. Shenzhen
+(22.5°N), first week of June, panels tilted 22° and facing south:
+
+```
+倾斜面/水平面 总量比 0.954
+```
+
+**The tilted plane collects four and a half per cent less than a horizontal
+one.** In June at this latitude the sun passes nearly overhead, so tilting south
+tilts the panel away from it. A tilt chosen for the annual total is the wrong
+tilt for the summer months, and a yield estimate that assumes tilting always
+helps is wrong in the direction that flatters the project. The same call for the
+first week of December returns **1.250** — the same panel, the same site, a
+thirty-point swing.
+
 ## Caching
 
 Keyed on a hash of the whole request — source, coordinates, dates, variables,
