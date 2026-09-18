@@ -23,7 +23,10 @@ Getting weather data is no longer the hard part; four public services will hand
 you a point series in a second. What is still hard is getting one that means
 what you think it means.
 
-Every bug that cost this project a day was a unit or a name that looked right:
+This package was extracted from two research projects —
+[pv-wind-power-forecast](https://github.com/Zhaohh0706/pv-wind-power-forecast) and
+[aiwp-china-verification](https://github.com/Zhaohh0706/aiwp-china-verification) — and every bug that
+cost either of them a day was a unit or a name that looked right:
 
 - Open-Meteo returns wind in **km/h** unless told otherwise and METAR reports it
   in **knots**. Compare them and the forecast is 3.6 or 1.9 times too fast, and
@@ -158,3 +161,9 @@ cube/
     arco_era5.py       Zarr, for areas and pressure levels (optional extra)
 tests/                 42 tests, none of which touch the network
 ```
+
+## Related repositories
+
+- [pv-wind-power-forecast](https://github.com/Zhaohh0706/pv-wind-power-forecast) — PV and wind forecasting, priced against Chinese grid-code assessment
+- [aiwp-china-verification](https://github.com/Zhaohh0706/aiwp-china-verification) — fixed-lead verification of physics and AI weather models at Chinese stations
+- [green-ai-ledger](https://github.com/Zhaohh0706/green-ai-ledger) — compute energy and carbon, with the grid factor pinned rather than guessed
