@@ -24,7 +24,7 @@ you a point series in a second. What is still hard is getting one that means
 what you think it means.
 
 This package was extracted from two research projects —
-[pv-wind-power-forecast](https://github.com/Zhaohh0706/pv-wind-power-forecast) and
+pv-wind-power-forecast and
 [aiwp-china-verification](https://github.com/Zhaohh0706/aiwp-china-verification) — and every bug that
 cost either of them a day was a unit or a name that looked right:
 
@@ -164,6 +164,5 @@ tests/                 42 tests, none of which touch the network
 
 ## Related repositories
 
-- [pv-wind-power-forecast](https://github.com/Zhaohh0706/pv-wind-power-forecast) — PV and wind forecasting, priced against Chinese grid-code assessment
 - [aiwp-china-verification](https://github.com/Zhaohh0706/aiwp-china-verification) — fixed-lead verification of physics and AI weather models at Chinese stations
 - [green-ai-ledger](https://github.com/Zhaohh0706/green-ai-ledger) — compute energy and carbon, with the grid factor pinned rather than guessed
