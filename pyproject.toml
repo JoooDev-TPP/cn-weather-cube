@@ -10,6 +10,10 @@ dependencies = ["pandas>=2.0", "pyarrow>=14", "numpy>=1.24"]
 [project.optional-dependencies]
 features = ["pvlib>=0.11"]
 area = ["xarray>=2024.1", "zarr>=2.16", "gcsfs>=2024.2"]
+# Reading raw forecast files by byte range needs a GRIB decoder.  It is an
+# extra because most uses of this package never touch a GRIB file, and
+# eccodes ships a compiled library that is a large thing to install by default.
+opendata = ["eccodes>=2.38"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

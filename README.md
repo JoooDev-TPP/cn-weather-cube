@@ -108,6 +108,57 @@ helps is wrong in the direction that flatters the project. The same call for the
 first week of December returns **1.250** — the same panel, the same site, a
 thirty-point swing.
 
+## When the point API runs out: raw files, one message at a time
+
+Point APIs have two ceilings. The archives that serve forecasts **at a stated
+lead** let a few stations through an hour, so a twelve-station study waits days
+for data that is already public. And a point API serves the variables it chose
+to serve — ask for a level or a model it does not carry and there is no request
+to make.
+
+ECMWF and NOAA both publish every run to S3 with a sidecar index giving the byte
+offset of every message inside the file. One 100 m wind field is **1.4 MB inside
+a 146 MB file**, so a range request fetches one per cent of the bytes, with no
+quota at all.
+
+```python
+from cube.sources import opendata
+
+opendata.series("ifs", "2026-09-20 00:00", "ws100", lat=22.54, lon=114.06,
+                steps=(24, 48))
+```
+
+```
+ run                  step_hours  value  unit  grid_distance_km  model
+ 2026-09-20 00:00:00          24   2.30   m/s               7.6  ECMWF IFS 0.25°
+ 2026-09-20 00:00:00          48   3.28   m/s               7.6  ECMWF IFS 0.25°
+```
+
+Three models: `ifs`, `aifs` (ECMWF's machine-learned model) and `gfs`. **The lead
+is in the file's name**, so it cannot drift — which is the property a
+verification study needs and the one a "latest available" archive cannot give.
+
+What the raw files ask in return is that nothing is done for you, and each of
+those things is a number that comes out plausible and wrong:
+
+- The file says `m s**-1` and `K`. Both are normalised and converted explicitly,
+  and a unit with no conversion defined is refused rather than passed through.
+- **ECMWF's irradiance is joules accumulated since the start of the forecast**;
+  GFS's is watts averaged over a window. Taking either as an instantaneous flux
+  is wrong by a factor of thousands, and it looks merely large at step 1. Here
+  `ghi` is differenced between steps and divided by the seconds between them;
+  GFS irradiance is **refused** rather than guessed at, because its averaging
+  window is a different question and is not implemented.
+- A 0.25° grid has no point at your site. The distance to the one it used
+  travels with every row, and a request whose nearest cell is more than 40 km
+  away is refused instead of being passed off as the site.
+- NOAA's index gives only where each message starts, so its length is the next
+  message's start. Off by one entry and the range returns bytes that begin with
+  `GRIB` and end mid-field — which sometimes decodes.
+
+Needs a GRIB decoder, which is why it is an extra: `pip install
+"cn-weather-cube[opendata]"`.
+
 ## Caching
 
 Keyed on a hash of the whole request — source, coordinates, dates, variables,

@@ -11,6 +11,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
+# The feature conversions are an optional extra; without it these are not
+# failures, they are tests for something that was not installed.
+pytest.importorskip("pvlib", reason="install cn-weather-cube[features]")
+
 from cube import features
 
 LAT, LON = 22.54, 114.06  # Shenzhen
