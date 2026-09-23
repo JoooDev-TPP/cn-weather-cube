@@ -159,6 +159,18 @@ those things is a number that comes out plausible and wrong:
 Needs a GRIB decoder, which is why it is an extra: `pip install
 "cn-weather-cube[opendata]"`.
 
+**Where this does not help, which is worth knowing before reaching for it.** A
+message is one field over the whole globe and cannot be subsetted spatially, so
+the cost scales with how many *times* you want, not how many sites. An hourly
+series at one lead, for one model and one variable over eighteen months, is
+13,176 messages — **18 GB**. Five leads is 90 GB; four models and two variables
+is 721 GB. The same thing through the point archive is one request per site.
+
+So this is not a way around the quota for a long hourly backfill. It is the way
+to get what the point archive does not carry at all: a model it does not serve,
+a level it does not offer, a field it never exposed — and a forward-looking daily
+collection of a few fields, where the count of messages stays small.
+
 ## Caching
 
 Keyed on a hash of the whole request — source, coordinates, dates, variables,
