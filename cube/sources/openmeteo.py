@@ -57,6 +57,7 @@ FIELDS = {
     "d2m": "dew_point_2m",
     "rh": "relative_humidity_2m",
     "sp": "surface_pressure",
+    "msl": "pressure_msl",
     "ws10": "wind_speed_10m",
     "wd10": "wind_direction_10m",
     "ws100": "wind_speed_100m",
@@ -103,6 +104,18 @@ def _get(url: str, params: dict, retries: int = 6, timeout: int = 240) -> dict |
             # off hard is the only correct response to it.
             time.sleep(min(90, 5 * 2**attempt))
     raise RuntimeError(f"open-meteo {url} failed after {retries} tries: {last}")
+
+
+def columns_for(field: str, columns, models: list[str] | None = None) -> list[str]:
+    """The response columns that hold exactly ``field``: the bare name, or the
+    name with one of the requested models appended.
+
+    Not a prefix match: ``precipitation`` must not pick up
+    ``precipitation_probability``. A quantity never borrows a column that merely
+    starts with its name.
+    """
+    wanted = {field} | {f"{field}_{m}" for m in (models or [])}
+    return [c for c in columns if c in wanted]
 
 
 def fetch(
@@ -178,7 +191,7 @@ def fetch(
 
     out = pd.DataFrame(index=frame.index)
     for variable, field in zip(variables, fields):
-        matching = [c for c in frame.columns if c.startswith(field)]
+        matching = columns_for(field, frame.columns, models)
         if not matching:
             raise RuntimeError(
                 f"{variable.name}: asked for {field}, the response has "
@@ -189,7 +202,11 @@ def fetch(
             # Multi-model responses suffix the model onto the field name; keep
             # that suffix so two models never collapse into one column.
             suffix = column[len(field):].lstrip("_")
-            out[f"{variable.name}_{suffix}" if suffix else variable.name] = frame[column]
+            # A null upstream stays NaN here (and null in the contract); it is
+            # never filled with zero or with another quantity's value.
+            out[f"{variable.name}_{suffix}" if suffix else variable.name] = pd.to_numeric(
+                frame[column], errors="coerce"
+            )
 
     cache.store(request, out, cache_root)
     return out

@@ -15,7 +15,8 @@ import sys
 
 import pandas as pd
 
-from . import api
+from . import api, contract
+from .sources import openmeteo
 from .schema import VARIABLES, UnitMismatch
 
 SOURCE_TABLE = """\
@@ -38,19 +39,39 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--vars", default="ghi,t2m,ws10")
-    parser.add_argument("-o", "--out", help="写入 parquet 或 csv")
+    parser.add_argument(
+        "-o", "--out",
+        help="写入 .parquet / .csv，或 .json（契约格式：每个值带 value|null、unit、observed_at、"
+             "nominal_at、source、qc_flag）",
+    )
     parser.add_argument("--refresh", action="store_true", help="忽略缓存")
+    parser.add_argument(
+        "--fallback", choices=sorted(set(openmeteo.ENDPOINTS) - {"elevation"}),
+        help="首选源失败时整段改用这个源，并把回退写进 source",
+    )
 
 
 def _write(frame: pd.DataFrame, out: str | None) -> None:
+    missing = {c: int(n) for c, n in frame.isna().sum().items() if n}
+    source = contract.source_of(frame)
     if not out:
         pd.set_option("display.width", 200)
         print(frame.head(12).round(2).to_string())
         print(f"\n{len(frame):,} 行 {frame.index.min()} → {frame.index.max()}")
-        print(f"来源 {frame.attrs.get('source')} | 单位 {frame.attrs.get('units')}")
-        return
-    frame.to_csv(out) if out.endswith(".csv") else frame.to_parquet(out)
-    print(f"{len(frame):,} 行写入 {out}")
+        print(f"来源 {source} | 单位 {frame.attrs.get('units')}")
+    elif out.endswith(".json"):
+        with open(out, "w", encoding="utf-8") as handle:
+            handle.write(contract.dumps(frame))
+        print(f"{len(frame):,} 行（契约 {contract.CONTRACT}）写入 {out}，来源 {source}")
+    else:
+        # NaN stays NaN in csv / parquet: a gap is written as empty, not as 0.
+        frame.to_csv(out) if out.endswith(".csv") else frame.to_parquet(out)
+        print(f"{len(frame):,} 行写入 {out}，来源 {source}")
+    if frame.attrs.get("fallback_from"):
+        print(f"回退：{frame.attrs['fallback_from']} 失败（{frame.attrs.get('fallback_reason')}），"
+              f"整段改用 {frame.attrs.get('source')}")
+    if missing:
+        print("缺测（保留为空，没有填 0）：" + "，".join(f"{c} {n} 个" for c, n in missing.items()))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -91,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             lead_days=getattr(args, "lead", None),
             models=(args.models.split(",") if getattr(args, "models", None) else None),
             refresh=args.refresh,
+            fallback=args.fallback,
         )
     except UnitMismatch as error:
         # Printed as a refusal rather than a traceback: this is the package

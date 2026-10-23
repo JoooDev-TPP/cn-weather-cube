@@ -50,7 +50,12 @@ VARIABLES: dict[str, Variable] = {
     "t2m": Variable("t2m", "degC", "air temperature at 2 m", ("°C", "degC", "C")),
     "d2m": Variable("d2m", "degC", "dewpoint at 2 m", ("°C", "degC", "C")),
     "rh": Variable("rh", "percent", "relative humidity", ("%", "percent")),
-    "sp": Variable("sp", "hPa", "surface pressure", ("hPa", "mb", "millibar")),
+    # Station (surface) pressure and sea-level pressure are different quantities,
+    # about 120 hPa apart at 1000 m. One never stands in for the other.
+    "sp": Variable("sp", "hPa", "surface (station) pressure", ("hPa", "mb", "millibar")),
+    "msl": Variable(
+        "msl", "hPa", "pressure reduced to mean sea level (QNH-like)", ("hPa", "mb", "millibar"),
+    ),
     "ws10": Variable("ws10", "m/s", "wind speed at 10 m", ("m/s", "ms")),
     "wd10": Variable("wd10", "deg", "wind direction at 10 m", ("°", "deg")),
     "ws100": Variable("ws100", "m/s", "wind speed at 100 m", ("m/s", "ms")),

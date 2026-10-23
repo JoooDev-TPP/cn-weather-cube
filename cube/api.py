@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .schema import Variable, resolve
+from .schema import UnitMismatch, Variable, resolve
 from .sources import openmeteo
 
 
@@ -57,6 +57,7 @@ def fetch(
     lead_days: int | None = None,
     source: str | None = None,
     refresh: bool = False,
+    fallback: str | None = None,
 ) -> pd.DataFrame:
     """Hourly weather at one point, in this package's units.
 
@@ -70,17 +71,39 @@ def fetch(
     ``truth``
         An observation to score against — the satellite retrieval, chosen by
         region.
+
+    ``fallback`` names an endpoint to try when the chosen one fails (network,
+    or the field is not published there). The frame then says
+    ``attrs["source"]`` = the fallback and ``attrs["fallback_from"]`` = the
+    endpoint that failed; ``cube.contract`` copies both onto every value.
+    Missing values are NaN on the frame and null in the contract — never zero.
     """
     variables: list[Variable] = resolve(vars)
     endpoint = source or choose_source(start, end, purpose)
-    frame = openmeteo.fetch(
-        lat, lon, start, end, variables,
-        endpoint=endpoint, models=models, lead_days=lead_days, refresh=refresh,
-    )
+    used, primary, reason = endpoint, None, None
+    try:
+        frame = openmeteo.fetch(
+            lat, lon, start, end, variables,
+            endpoint=endpoint, models=models, lead_days=lead_days, refresh=refresh,
+        )
+    except UnitMismatch:
+        # A refusal, not an outage: another source would not make the unit right.
+        raise
+    except RuntimeError as error:
+        if not fallback or fallback == endpoint:
+            raise
+        # The whole series comes from the fallback and says so. It is never
+        # stitched row by row onto the primary to fill gaps.
+        frame = openmeteo.fetch(
+            lat, lon, start, end, variables,
+            endpoint=fallback, models=models, lead_days=lead_days, refresh=refresh,
+        )
+        used, primary, reason = fallback, f"openmeteo.{endpoint}", str(error)[:300]
     # Recorded on the frame rather than in a docstring: six months later the
     # question about any saved series is which endpoint produced it.
     frame.attrs.update(
-        {"source": f"openmeteo.{endpoint}", "purpose": purpose,
+        {"source": f"openmeteo.{used}", "fallback_from": primary,
+         "fallback_reason": reason, "purpose": purpose,
          "lat": lat, "lon": lon, "lead_days": lead_days,
          "units": {v.name: v.unit for v in variables}}
     )

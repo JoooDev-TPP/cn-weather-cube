@@ -126,8 +126,10 @@ def clearsky_index(
 
     site = pvlib.location.Location(latitude, longitude, tz="UTC")
     clear = site.get_clearsky(frame.index, model="haurwitz")["ghi"]
+    # A missing GHI stays missing at night too: zero would read as "measured dark".
+    kt = np.where(clear > 20, frame[ghi] / clear.clip(lower=20), 0.0)
     return pd.Series(
-        np.where(clear > 20, frame[ghi] / clear.clip(lower=20), 0.0),
+        np.where(frame[ghi].isna(), np.nan, kt),
         index=frame.index,
         name="kt",
     )

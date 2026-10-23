@@ -134,3 +134,10 @@ class TestClearskyIndex:
         kt = features.clearsky_index(frame, LAT, LON)
         daylight = frame["ghi"] > 50
         assert kt[daylight].mean() == pytest.approx(1.0, abs=0.05)
+
+    def test_a_missing_ghi_stays_missing_day_and_night(self):
+        frame = _day()
+        frame.iloc[[0, 12], frame.columns.get_loc("ghi")] = np.nan
+        kt = features.clearsky_index(frame, LAT, LON)
+        assert kt.iloc[[0, 12]].isna().all()
+        assert kt.drop(kt.index[[0, 12]]).notna().all()

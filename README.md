@@ -171,6 +171,31 @@ to get what the point archive does not carry at all: a model it does not serve,
 a level it does not offer, a field it never exposed — and a forward-looking daily
 collection of a few fields, where the count of messages stays small.
 
+## Missing values, substitutes and fallbacks
+
+`cube fetch ... -o series.json` (or `cube.contract.document(frame)`) writes every
+value as
+
+```json
+{"name": "precip", "value": null, "unit": "mm", "observed_at": null,
+ "nominal_at": "2025-01-01T01:00:00Z", "source": "openmeteo.archive", "qc_flag": "missing"}
+```
+
+- **A gap is `null`, never `0`.** Missing precipitation is not "no rain".
+  Nothing is interpolated or carried forward. csv and parquet keep it empty / NaN.
+- **One quantity never stands in for another.** `sp` (station pressure) is read
+  only from `surface_pressure`, `msl` (QNH-like) only from `pressure_msl`, and a
+  column that merely starts with a field's name (`precipitation_probability`) is
+  never taken. A field the source does not publish is an error, not a borrow.
+- **A fallback is written on every value.** `--fallback forecast` takes the whole
+  series from the other endpoint when the first fails and marks it
+  `"openmeteo.forecast;fallback_from=openmeteo.archive"`. A unit refusal is never
+  routed around, and gaps are never patched from a second source.
+- **`nominal_at` and `observed_at` are separate.** The first is the hourly slot;
+  the second is when the value actually describes (equal for gridded products,
+  null for a gap).
+- `qc_flag` is `ok`, `missing` or `out_of_range` (kept as reported, not clipped).
+
 ## Caching
 
 Keyed on a hash of the whole request — source, coordinates, dates, variables,
@@ -216,6 +241,7 @@ pip install -e '.[area]'      # + xarray/zarr/gcsfs, for ARCO-ERA5
 cube/
   schema.py            variables, units, and the refusal when they do not match
   api.py               fetch(), and which source answers which question
+  contract.py          value|null, unit, observed_at, nominal_at, source, qc_flag
   cache.py             request-hashed local cache
   features.py          POA irradiance, hub wind, air density, clear-sky index
   cli.py               cube fetch / verify / sources / vars
