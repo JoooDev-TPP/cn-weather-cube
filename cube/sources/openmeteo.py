@@ -66,6 +66,40 @@ FIELDS = {
     "precip": "precipitation",
 }
 
+#: Irradiance comes two ways.  The plain fields (``shortwave_radiation``) are the
+#: mean of the *preceding* hour: the value filed under 12:00 describes
+#: 11:00-12:00, centred on 11:30.  Taking it as the 12:00 value puts every
+#: sunrise and sunset half an hour late; joined to a target labelled at the
+#: start of its hour (SMARD) it is a full hour late.  The ``_instant`` fields are
+#: the value at the hour.  All four endpoints serve both.
+RADIATION = ("ghi", "dni", "dhi")
+IRRADIANCE_MODES = ("instant", "preceding_mean")
+
+#: What each of this package's variables means on Open-Meteo, per the API
+#: documentation: radiation and precipitation are preceding-hour aggregates,
+#: everything else is the instantaneous value at the hour.
+INTERVAL = {"ghi": "preceding_mean", "dni": "preceding_mean", "dhi": "preceding_mean",
+            "precip": "preceding_sum"}
+
+
+def field_for(name: str, irradiance: str = "instant") -> str:
+    """The Open-Meteo field to request for one of this package's names."""
+    if irradiance not in IRRADIANCE_MODES:
+        raise ValueError(f"irradiance must be one of {IRRADIANCE_MODES}, not {irradiance!r}")
+    field = FIELDS[name]
+    if name in RADIATION and irradiance == "instant":
+        return f"{field}_instant"
+    return field
+
+
+def interval_for(name: str, irradiance: str = "instant") -> tuple[str, str | None]:
+    """(interval, window) for a value of ``name`` filed under its hour."""
+    if name in RADIATION and irradiance == "instant":
+        return "instant", None
+    interval = INTERVAL.get(name, "instant")
+    return interval, (None if interval == "instant" else "PT1H")
+
+
 # Satellite products by region.  "Seamless" picks for you and picks wrong often
 # enough — over Europe it starts in 2026 — that the region is asked for instead.
 SATELLITE_BY_REGION = {
@@ -130,13 +164,21 @@ def fetch(
     region: str | None = None,
     refresh: bool = False,
     cache_root=None,
+    irradiance: str = "instant",
 ) -> pd.DataFrame:
-    """One point, hourly, in this package's units, cached."""
+    """One point, hourly, in this package's units, cached.
+
+    ``irradiance="instant"`` (default) requests the ``_instant`` radiation
+    fields, whose value at T is the value at T.  ``"preceding_mean"`` requests
+    the hourly means, which describe [T-1h, T]; use it when the target is an
+    hourly mean and shift the labels deliberately.  Either way the frame says
+    which in ``attrs["intervals"]`` and the contract copies it onto every value.
+    """
     if endpoint not in ENDPOINTS:
         raise ValueError(f"unknown endpoint {endpoint!r}; expected {sorted(ENDPOINTS)}")
 
     names = [v.name for v in variables]
-    fields = [FIELDS[n] for n in names]
+    fields = [field_for(n, irradiance) for n in names]
     if endpoint == "previous_runs":
         if lead_days is None:
             raise ValueError(
@@ -160,11 +202,25 @@ def fetch(
             region or satellite_region(latitude, longitude)
         ]
         request["product"] = product
+    if irradiance != "preceding_mean" and any(n in RADIATION for n in names):
+        # Only in the key when it changes the answer, so caches of hourly-mean
+        # requests made before this option existed are still found.
+        request["irradiance"] = irradiance
+
+    def declare(frame: pd.DataFrame) -> pd.DataFrame:
+        frame.attrs["intervals"] = {
+            column: interval_for(variable_name(column), irradiance) for column in frame.columns
+        }
+        return frame
+
+    def variable_name(column: str) -> str:
+        return next(n for n in sorted(names, key=len, reverse=True)
+                    if column == n or column.startswith(n + "_"))
 
     if not refresh:
         cached = cache.load(request, cache_root)
         if cached is not None:
-            return cached
+            return declare(cached)
 
     params = {
         "latitude": latitude,
@@ -209,7 +265,7 @@ def fetch(
             )
 
     cache.store(request, out, cache_root)
-    return out
+    return declare(out)
 
 
 def elevation(points: list[tuple[float, float]]) -> list[float]:

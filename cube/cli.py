@@ -42,9 +42,14 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-o", "--out",
         help="写入 .parquet / .csv，或 .json（契约格式：每个值带 value|null、unit、observed_at、"
-             "nominal_at、source、qc_flag）",
+             "nominal_at、interval、window、source、qc_flag）",
     )
     parser.add_argument("--refresh", action="store_true", help="忽略缓存")
+    parser.add_argument(
+        "--irradiance", choices=("instant", "preceding_mean"), default="instant",
+        help="辐照取瞬时值（默认，T 时刻的值）还是前一小时均值（描述 [T-1h, T]，"
+             "对齐逐时均值目标时用，要自己挪标签）",
+    )
     parser.add_argument(
         "--fallback", choices=sorted(set(openmeteo.ENDPOINTS) - {"elevation"}),
         help="首选源失败时整段改用这个源，并把回退写进 source",
@@ -113,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             models=(args.models.split(",") if getattr(args, "models", None) else None),
             refresh=args.refresh,
             fallback=args.fallback,
+            irradiance=args.irradiance,
         )
     except UnitMismatch as error:
         # Printed as a refusal rather than a traceback: this is the package

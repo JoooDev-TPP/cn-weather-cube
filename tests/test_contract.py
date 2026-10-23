@@ -81,11 +81,11 @@ class TestMissingIsNull:
         # A real zero stays a real zero, distinct from a gap.
         assert json.loads(text)["values"][1]["value"] == 0.0
 
-    def test_every_value_has_all_six_fields(self, upstream):
+    def test_every_value_has_all_contract_fields(self, upstream):
         answers, _ = upstream
         answers["archive"] = _payload({"shortwave_radiation": [0.0, None, 310.0]},
                                       {"shortwave_radiation": "W/m²"})
-        for value in contract.records(_fetch(vars="ghi")):
+        for value in contract.records(_fetch(vars="ghi", irradiance="preceding_mean")):
             assert set(contract.FIELDS) <= set(value)
             assert value["unit"] == "W/m^2" and value["source"] == "openmeteo.archive"
             assert value["qc_flag"] in contract.QC_FLAGS
@@ -176,11 +176,85 @@ class TestTimes:
         assert second["value"] is None and second["observed_at"] is None
         assert second["nominal_at"] == "2025-01-01T12:00:00Z"
 
-    def test_gridded_values_are_observed_at_their_nominal_hour(self):
+    def test_undeclared_irradiance_is_unknown_not_instant(self):
         frame = pd.DataFrame({"ghi": [120.0]}, index=pd.DatetimeIndex(["2025-06-01T04:00Z"]))
-        frame.attrs["source"] = "openmeteo.archive"
+        frame.attrs["source"] = "somewhere"
         (only,) = contract.records(frame)
-        assert only["observed_at"] == only["nominal_at"] == "2025-06-01T04:00:00Z"
+        assert only["interval"] == "unknown" and only["window"] is None
+
+    def test_temperature_is_instant_by_default(self):
+        value = contract.quantity("t2m", 3.0, nominal_at="2025-01-01T00:00Z", source="x")
+        assert value["interval"] == "instant" and value["observed_at"] == value["nominal_at"]
+
+    def test_a_preceding_mean_is_observed_at_its_midpoint(self):
+        value = contract.quantity("ghi", 500.0, nominal_at="2025-06-01T12:00Z", source="x",
+                                  interval=("preceding_mean", "PT1H"))
+        assert value["nominal_at"] == "2025-06-01T12:00:00Z"
+        assert value["observed_at"] == "2025-06-01T11:30:00Z"
+        assert value["interval"] == "preceding_mean" and value["window"] == "PT1H"
+
+    def test_a_following_mean_is_observed_after_its_label(self):
+        value = contract.quantity("ghi", 500.0, nominal_at="2025-06-01T12:00Z", source="x",
+                                  interval=("following_mean", "PT15M"))
+        assert value["observed_at"] == "2025-06-01T12:07:30Z"
+
+    def test_a_mean_without_a_window_is_refused(self):
+        with pytest.raises(ValueError, match="window"):
+            contract.quantity("ghi", 1.0, nominal_at="2025-01-01T00:00Z", source="x",
+                              interval="preceding_mean")
+
+    def test_an_unknown_interval_name_is_refused(self):
+        with pytest.raises(ValueError, match="interval"):
+            contract.quantity("ghi", 1.0, nominal_at="2025-01-01T00:00Z", source="x",
+                              interval="centred")
+
+    def test_openmeteo_hourly_mean_radiation_is_preceding(self, upstream):
+        answers, _ = upstream
+        answers["archive"] = _payload(
+            {"shortwave_radiation": [0.0, 80.0, 300.0], "temperature_2m": [1.0, 2.0, 3.0]},
+            {"shortwave_radiation": "W/m²", "temperature_2m": "°C"},
+        )
+        frame = _fetch(vars="ghi,t2m", irradiance="preceding_mean")
+        values = {(v["name"], v["nominal_at"]): v for v in contract.records(frame)}
+        ghi = values[("ghi", "2025-01-01T01:00:00Z")]
+        assert ghi["interval"] == "preceding_mean" and ghi["observed_at"] == "2025-01-01T00:30:00Z"
+        t2m = values[("t2m", "2025-01-01T01:00:00Z")]
+        assert t2m["interval"] == "instant" and t2m["observed_at"] == "2025-01-01T01:00:00Z"
+        assert contract.document(frame)["intervals"]["ghi"] == {
+            "interval": "preceding_mean", "window": "PT1H"}
+
+    def test_instant_radiation_is_requested_by_default(self, upstream, monkeypatch):
+        answers, _ = upstream
+        seen = {}
+        fake = openmeteo._get
+
+        def spy(url, params, **kw):
+            seen.update(params)
+            return fake(url, params, **kw)
+
+        monkeypatch.setattr(openmeteo, "_get", spy)
+        answers["archive"] = _payload({"shortwave_radiation_instant": [0.0, 90.0, 310.0]},
+                                      {"shortwave_radiation_instant": "W/m²"})
+        frame = _fetch(vars="ghi")
+        assert seen["hourly"] == "shortwave_radiation_instant"
+        assert list(frame.columns) == ["ghi"]
+        (first, *_rest) = contract.records(frame)
+        assert first["interval"] == "instant" and first["observed_at"] == first["nominal_at"]
+
+    def test_precipitation_is_a_preceding_sum(self, upstream):
+        answers, _ = upstream
+        answers["archive"] = _payload({"precipitation": [0.0, 0.2, 0.0]}, {"precipitation": "mm"})
+        frame = _fetch(vars="precip")
+        assert {v["interval"] for v in contract.records(frame)} == {"preceding_sum"}
+
+    def test_the_interval_survives_the_cache(self, upstream):
+        answers, calls = upstream
+        answers["archive"] = _payload({"shortwave_radiation": [0.0, 80.0, 300.0]},
+                                      {"shortwave_radiation": "W/m²"})
+        _fetch(vars="ghi", irradiance="preceding_mean")
+        again = _fetch(vars="ghi", irradiance="preceding_mean", refresh=False)
+        assert calls == ["archive"]
+        assert again.attrs["intervals"]["ghi"] == ("preceding_mean", "PT1H")
 
     def test_out_of_range_is_flagged_not_clipped(self):
         value = contract.quantity("rh", 140.0, nominal_at="2025-01-01T00:00Z", source="x")

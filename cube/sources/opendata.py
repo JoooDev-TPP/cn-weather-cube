@@ -280,8 +280,13 @@ def series(model: str, run: str | pd.Timestamp, variable: str, lat: float, lon: 
                 f"{variable}: this package works in {expected}; the file gave {unit!r} "
                 f"and no conversion is defined for it."
             )
+        # The differenced flux is the mean over the preceding gap, not the value
+        # at valid_time; say so rather than let a join treat it as an instant.
+        window = f"PT{step - needed[1]}H" if accumulated else None
         rows.append({"run": run, "step_hours": step,
                      "valid_time": run + pd.Timedelta(hours=step),
+                     "interval": "preceding_mean" if accumulated else "instant",
+                     "window": window,
                      "value": value, "unit": expected,
                      "grid_distance_km": distance, "model": spec.label})
     return pd.DataFrame(rows)

@@ -77,7 +77,12 @@ def area(
 
 
 def point(fields: list[str], start: str, end: str, lat: float, lon: float) -> pd.DataFrame:
-    """One point, for completeness. The point API is about twenty times faster."""
+    """One point, for completeness. The point API is about twenty times faster.
+
+    Raw ERA5 fields: ``surface_solar_radiation_downwards`` is J/m² accumulated
+    over the hour *ending* at the timestamp (a preceding-hour aggregate, divide
+    by 3600 for the mean W/m² over [T-1h, T]); the other fields are instants.
+    """
     dataset = open_store()
     selected = dataset[[FIELDS.get(f, f) for f in fields]].sel(
         time=slice(start, end),

@@ -25,11 +25,24 @@ fallback_from=openmeteo.archive"``). Values are never mixed row by row between
 sources to patch gaps: a gap in the source that answered stays a gap.
 
 ``nominal_at`` is the regular slot a value is filed under (the hour on the
-index). ``observed_at`` is when the value actually describes, when the source
-says; for gridded products (reanalysis, forecast, satellite retrieval) the two
-coincide. A frame may carry ``<column>__observed_at`` to say otherwise (a station
-report at 10:47 filed under 11:00). A missing value has no ``observed_at``.
-Downstream freshness checks read the two separately.
+index). ``interval`` says what window the value describes, relative to that
+slot (``cube.schema.INTERVALS``): ``instant`` is the state at ``nominal_at``;
+``preceding_mean`` is the mean over ``[nominal_at - window, nominal_at]``;
+``following_mean`` the mean over ``[nominal_at, nominal_at + window]``;
+``preceding_sum`` a total over the preceding window. ``window`` is an ISO
+duration, ``null`` for an instant.
+
+``observed_at`` is the single time the value is best read as describing: for an
+instant, ``nominal_at``; for a mean or sum, the midpoint of its window. Gridded
+irradiance from Open-Meteo's plain fields is therefore *not* observed at its
+nominal hour: the 12:00 value is the 11:00-12:00 mean, observed at 11:30. An
+earlier version of this contract said gridded values were observed at their
+nominal hour; for radiation that put every sunrise half an hour late, and a
+join to SMARD (hourly means labelled at the start) a full hour late. A frame
+may also carry ``<column>__observed_at`` to say otherwise (a station report at
+10:47 filed under 11:00). A missing value has no ``observed_at``. A column whose
+interval nobody declared is ``unknown`` and keeps ``observed_at = nominal_at``;
+consumers must not align it with anything until it is declared.
 """
 from __future__ import annotations
 
@@ -39,10 +52,11 @@ from typing import Any
 
 import pandas as pd
 
-from .schema import VARIABLES
+from .schema import INTERVALS, VARIABLES
 
-CONTRACT = "point-weather/1"
-FIELDS = ("value", "unit", "observed_at", "nominal_at", "source", "qc_flag")
+CONTRACT = "point-weather/2"
+FIELDS = ("value", "unit", "observed_at", "nominal_at", "interval", "window", "source",
+          "qc_flag")
 QC_FLAGS = ("ok", "missing", "out_of_range")
 OBSERVED_SUFFIX = "__observed_at"
 
@@ -88,23 +102,56 @@ def _missing(value: Any) -> bool:
         return False
 
 
+def interval_of(variable: str, declared: Any = None) -> tuple[str, str | None]:
+    """(interval, window) for a value: the source's declaration, else the
+    variable's own default, else ``unknown``."""
+    if declared is not None:
+        interval, window = (declared, None) if isinstance(declared, str) else tuple(declared)
+    else:
+        interval, window = VARIABLES[variable].default_interval or "unknown", None
+    if interval not in INTERVALS:
+        raise ValueError(f"interval {interval!r} is not one of {INTERVALS}")
+    if interval in ("instant", "unknown"):
+        return interval, None
+    if not window:
+        raise ValueError(f"a {interval} value needs a window (an ISO duration such as PT1H)")
+    return interval, str(window)
+
+
+def _midpoint(nominal: Any, interval: str, window: str | None) -> Any:
+    if window is None:
+        return nominal
+    half = pd.Timedelta(window) / 2
+    stamp = pd.Timestamp(nominal)
+    return stamp - half if interval.startswith("preceding") else stamp + half
+
+
 def quantity(variable: str, value: Any, *, nominal_at: Any, source: str,
-             observed_at: Any = None) -> dict:
-    """One value under the contract. ``observed_at`` defaults to ``nominal_at``."""
+             observed_at: Any = None, interval: Any = None) -> dict:
+    """One value under the contract.
+
+    ``observed_at`` defaults to ``nominal_at`` for an instant and to the middle
+    of the window for a mean or a sum. ``interval`` is a name from
+    ``cube.schema.INTERVALS`` or an ``(interval, window)`` pair.
+    """
     spec = VARIABLES[variable]
     if not source:
         raise ValueError("every value names its source")
     nominal = _iso(nominal_at)
     if nominal is None:
         raise ValueError("every value has a nominal time")
+    kind, window = interval_of(variable, interval)
     if _missing(value):
         return {"value": None, "unit": spec.unit, "observed_at": None,
-                "nominal_at": nominal, "source": source, "qc_flag": "missing"}
+                "nominal_at": nominal, "interval": kind, "window": window,
+                "source": source, "qc_flag": "missing"}
     number = float(value)
     low, high = PLAUSIBLE.get(variable, (-math.inf, math.inf))
-    observed = _iso(observed_at) if observed_at is not None else nominal
+    observed = (_iso(observed_at) if observed_at is not None
+                else _iso(_midpoint(nominal_at, kind, window)))
     return {"value": number, "unit": spec.unit, "observed_at": observed,
-            "nominal_at": nominal, "source": source,
+            "nominal_at": nominal, "interval": kind, "window": window,
+            "source": source,
             "qc_flag": "ok" if low <= number <= high else "out_of_range"}
 
 
@@ -121,12 +168,14 @@ def records(frame: pd.DataFrame) -> list[dict]:
     """Every (time, column) of a fetched frame as a contract value, plus its name."""
     source = source_of(frame)
     columns = [c for c in frame.columns if not str(c).endswith(OBSERVED_SUFFIX)]
+    intervals = frame.attrs.get("intervals") or {}
     out: list[dict] = []
     for nominal, row in frame.iterrows():
         for column in columns:
             observed = row.get(f"{column}{OBSERVED_SUFFIX}") if f"{column}{OBSERVED_SUFFIX}" in frame else None
             value = quantity(variable_of(column), row[column], nominal_at=nominal,
-                             source=source, observed_at=observed)
+                             source=source, observed_at=observed,
+                             interval=intervals.get(column))
             out.append({"name": column, **value})
     return out
 
@@ -134,6 +183,7 @@ def records(frame: pd.DataFrame) -> list[dict]:
 def document(frame: pd.DataFrame) -> dict:
     """The whole series as one JSON-ready object: provenance, gap counts, values."""
     values = records(frame)
+    intervals = frame.attrs.get("intervals") or {}
     missing: dict[str, int] = {}
     for v in values:
         if v["qc_flag"] == "missing":
@@ -149,6 +199,10 @@ def document(frame: pd.DataFrame) -> dict:
         "lon": attrs.get("lon"),
         "lead_days": attrs.get("lead_days"),
         "missing": missing,
+        "intervals": {name: dict(zip(("interval", "window"), interval_of(variable_of(name),
+                                                                          intervals.get(name))))
+                      for name in [c for c in frame.columns
+                                   if not str(c).endswith(OBSERVED_SUFFIX)]},
         "values": values,
     }
 

@@ -58,6 +58,7 @@ def fetch(
     source: str | None = None,
     refresh: bool = False,
     fallback: str | None = None,
+    irradiance: str = "instant",
 ) -> pd.DataFrame:
     """Hourly weather at one point, in this package's units.
 
@@ -77,6 +78,10 @@ def fetch(
     ``attrs["source"]`` = the fallback and ``attrs["fallback_from"]`` = the
     endpoint that failed; ``cube.contract`` copies both onto every value.
     Missing values are NaN on the frame and null in the contract — never zero.
+
+    ``irradiance`` is ``instant`` (the value at the hour, default) or
+    ``preceding_mean`` (Open-Meteo's hourly mean over the hour *before* the
+    label). ``attrs["intervals"]`` records which, per column.
     """
     variables: list[Variable] = resolve(vars)
     endpoint = source or choose_source(start, end, purpose)
@@ -85,6 +90,7 @@ def fetch(
         frame = openmeteo.fetch(
             lat, lon, start, end, variables,
             endpoint=endpoint, models=models, lead_days=lead_days, refresh=refresh,
+            irradiance=irradiance,
         )
     except UnitMismatch:
         # A refusal, not an outage: another source would not make the unit right.
@@ -97,6 +103,7 @@ def fetch(
         frame = openmeteo.fetch(
             lat, lon, start, end, variables,
             endpoint=fallback, models=models, lead_days=lead_days, refresh=refresh,
+            irradiance=irradiance,
         )
         used, primary, reason = fallback, f"openmeteo.{endpoint}", str(error)[:300]
     # Recorded on the frame rather than in a docstring: six months later the

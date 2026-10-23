@@ -34,18 +34,36 @@ class Variable:
     #: irradiance into something 24 times too small, or a daily total into
     #: something 24 times too large.
     accumulates: bool = False
+    #: What time window a value describes when nothing source-specific is
+    #: declared.  ``None`` means "depends on the source, must be declared":
+    #: irradiance is an instantaneous value in one product and the mean of the
+    #: preceding hour in another, and the two are 30 minutes apart.
+    default_interval: str | None = "instant"
+
+
+#: What a value filed under nominal time T describes.
+#:
+#: ``instant``         the state at T.
+#: ``preceding_mean``  the mean over [T - window, T]  (Open-Meteo radiation).
+#: ``following_mean``  the mean over [T, T + window]  (SMARD, ENTSO-E periods).
+#: ``preceding_sum``   the total over [T - window, T] (precipitation).
+#: ``unknown``         not declared; a consumer must not join it to anything.
+INTERVALS = ("instant", "preceding_mean", "following_mean", "preceding_sum", "unknown")
 
 
 VARIABLES: dict[str, Variable] = {
     "ghi": Variable(
         "ghi", "W/m^2", "global horizontal irradiance",
         ("W/m²", "W/m^2", "w/m2"),
+        default_interval=None,
     ),
     "dni": Variable(
         "dni", "W/m^2", "direct normal irradiance", ("W/m²", "W/m^2", "w/m2"),
+        default_interval=None,
     ),
     "dhi": Variable(
         "dhi", "W/m^2", "diffuse horizontal irradiance", ("W/m²", "W/m^2", "w/m2"),
+        default_interval=None,
     ),
     "t2m": Variable("t2m", "degC", "air temperature at 2 m", ("°C", "degC", "C")),
     "d2m": Variable("d2m", "degC", "dewpoint at 2 m", ("°C", "degC", "C")),
@@ -63,6 +81,7 @@ VARIABLES: dict[str, Variable] = {
     "cloud": Variable("cloud", "percent", "total cloud cover", ("%", "percent")),
     "precip": Variable(
         "precip", "mm", "precipitation", ("mm", "millimeter"), accumulates=True,
+        default_interval=None,
     ),
 }
 

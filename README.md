@@ -178,7 +178,8 @@ value as
 
 ```json
 {"name": "precip", "value": null, "unit": "mm", "observed_at": null,
- "nominal_at": "2025-01-01T01:00:00Z", "source": "openmeteo.archive", "qc_flag": "missing"}
+ "nominal_at": "2025-01-01T01:00:00Z", "interval": "preceding_sum", "window": "PT1H",
+ "source": "openmeteo.archive", "qc_flag": "missing"}
 ```
 
 - **A gap is `null`, never `0`.** Missing precipitation is not "no rain".
@@ -191,9 +192,18 @@ value as
   series from the other endpoint when the first fails and marks it
   `"openmeteo.forecast;fallback_from=openmeteo.archive"`. A unit refusal is never
   routed around, and gaps are never patched from a second source.
-- **`nominal_at` and `observed_at` are separate.** The first is the hourly slot;
-  the second is when the value actually describes (equal for gridded products,
-  null for a gap).
+- **`nominal_at` and `observed_at` are separate, and `interval` says why.** The
+  first is the hourly slot. `interval` is `instant`, `preceding_mean`,
+  `following_mean`, `preceding_sum` or `unknown`, with `window` (e.g. `PT1H`).
+  `observed_at` is `nominal_at` for an instant and the middle of the window for a
+  mean (null for a gap). Open-Meteo's plain radiation fields are the mean of the
+  hour *before* the label, so the 12:00 value is observed at 11:30; read as the
+  12:00 value it puts sunrise half an hour late, and joined to SMARD (hourly
+  means labelled at the start of the hour) a full hour late. `ghi`/`dni`/`dhi`
+  are therefore fetched as Open-Meteo's `_instant` fields by default;
+  `--irradiance preceding_mean` asks for the hourly means and labels them so.
+  Contract `point-weather/2` (`/1` lacked `interval`/`window` and claimed gridded
+  radiation was observed at its nominal hour).
 - `qc_flag` is `ok`, `missing` or `out_of_range` (kept as reported, not clipped).
 
 ## Caching
@@ -241,7 +251,7 @@ pip install -e '.[area]'      # + xarray/zarr/gcsfs, for ARCO-ERA5
 cube/
   schema.py            variables, units, and the refusal when they do not match
   api.py               fetch(), and which source answers which question
-  contract.py          value|null, unit, observed_at, nominal_at, source, qc_flag
+  contract.py          value|null, unit, observed_at, nominal_at, interval, window, source, qc_flag
   cache.py             request-hashed local cache
   features.py          POA irradiance, hub wind, air density, clear-sky index
   cli.py               cube fetch / verify / sources / vars
