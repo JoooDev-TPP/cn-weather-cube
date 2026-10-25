@@ -25,7 +25,7 @@ what you think it means.
 
 This package was extracted from two research projects —
 pv-wind-power-forecast and
-[aiwp-china-verification](https://github.com/Zhaohh0706/aiwp-china-verification) — and every bug that
+[aiwp-china-verification](https://github.com/JoooDev-TPP/aiwp-china-verification) — and every bug that
 cost either of them a day was a unit or a name that looked right:
 
 - Open-Meteo returns wind in **km/h** unless told otherwise and METAR reports it
@@ -227,5 +227,5 @@ tests/                 42 tests, none of which touch the network
 
 ## Related repositories
 
-- [aiwp-china-verification](https://github.com/Zhaohh0706/aiwp-china-verification) — fixed-lead verification of physics and AI weather models at Chinese stations
-- [green-ai-ledger](https://github.com/Zhaohh0706/green-ai-ledger) — compute energy and carbon, with the grid factor pinned rather than guessed
+- [aiwp-china-verification](https://github.com/JoooDev-TPP/aiwp-china-verification) — fixed-lead verification of physics and AI weather models at Chinese stations
+- [green-ai-ledger](https://github.com/JoooDev-TPP/green-ai-ledger) — compute energy and carbon, with the grid factor pinned rather than guessed
