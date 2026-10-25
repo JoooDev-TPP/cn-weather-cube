@@ -1,21 +1,39 @@
 # cn-weather-cube
 
+[![tests](https://github.com/JoooDev-TPP/cn-weather-cube/actions/workflows/test.yml/badge.svg)](https://github.com/JoooDev-TPP/cn-weather-cube/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/github/license/JoooDev-TPP/cn-weather-cube)](LICENSE)
+
 Point weather for renewable-energy work, without downloading anything — with the
-unit attached to every number and the source named on every series.
-
-```python
-from cube import fetch
-
-df = fetch(lat=22.54, lon=114.06, start="2024-01-01", end="2024-12-31",
-           vars="ghi,t2m,ws100")
-```
+unit attached to every number and the source named on every series. When a
+source returns a unit you did not ask for, it refuses instead of handing you a
+plausible wrong number.
 
 ```bash
+pip install "git+https://github.com/JoooDev-TPP/cn-weather-cube"
+
 cube fetch --lat 22.54 --lon 114.06 --start 2024-01-01 --end 2024-12-31 \
            --vars ghi,t2m,ws100 -o shenzhen.parquet
 cube sources     # which source answers which question
 cube vars        # what can be asked for, and in what units
 ```
+
+```python
+>>> from cube import fetch
+>>> df = fetch(lat=22.54, lon=114.06, start="2024-01-01", end="2024-12-31",
+...            vars="ghi,t2m,ws100")
+
+>>> from cube.schema import check_unit
+>>> check_unit("ws10", "km/h")
+UnitMismatch: ws10: asked for m/s, source returned 'km/h'. Refusing to
+continue — a silent unit mismatch here is a factor-of-3.6 error that still
+looks like a plausible number.
+```
+
+<!-- TODO: optional terminal screenshot or short GIF of `cube fetch` + `cube sources` (ripgrep/bat pattern); none exists yet -->
+
+Extras: `.[features]` adds pvlib for the renewable-energy features, `.[area]`
+adds xarray/zarr/gcsfs for ARCO-ERA5, `.[opendata]` adds a GRIB decoder for raw
+forecast files. From a clone: `pip install -e .`.
 
 ## Why this exists
 
@@ -41,18 +59,7 @@ cost either of them a day was a unit or a name that looked right:
 
 None of those raise. They produce plausible numbers. So here a variable is not a
 string — it is a name, a unit, and what to do when a source offers something
-else:
-
-```python
->>> fetch(lat=40.0, lon=116.0, start="2025-01-01", end="2025-01-07", vars="ws10")
-# asked for m/s explicitly, checked that m/s came back
-
->>> from cube.schema import check_unit
->>> check_unit("ws10", "km/h")
-UnitMismatch: ws10: asked for m/s, source returned 'km/h'. Refusing to
-continue — a silent unit mismatch here is a factor-of-3.6 error that still
-looks like a plausible number.
-```
+else.
 
 ## Which source answers which question
 
@@ -65,9 +72,8 @@ looks like a plausible number.
 | An area, or pressure levels | ARCO-ERA5 over Zarr | One global chunk per hour, so a single point still reads 48 chunks and takes ~30 s against 1.5 s for the point API. Use it for the shapes a point API cannot do, not for points. |
 
 `choose_source` implements this, and `purpose=` is the argument that selects it.
-It is not a convenience: "what was the resource" and "how good is this forecast"
-are different questions, and the reanalysis will answer both — wrongly, for the
-second.
+"What was the resource" and "how good is this forecast" are different questions,
+and the reanalysis will answer both — wrongly, for the second.
 
 ## Renewable-energy features
 
@@ -83,43 +89,32 @@ kt  = features.clearsky_index(df, lat=22.54, lon=114.06)            # 0–1
 Each states what it assumed where it had to assume:
 
 - `plane_of_array` separates beam from diffuse with the **Erbs correlation**
-  when only global horizontal is available. That is a correlation fitted to
+  when only global horizontal is available — a correlation fitted to
   mid-latitude data, not a measurement. Pass `dni` and `dhi` if the source has
   them and it will use those instead.
 - `hub_wind` fits the **shear exponent per time step** when two levels are
   available, because shear varies by a factor of three between a stable night
   and a convective afternoon. With one level it falls back to the one-seventh
-  power law and **says so in the returned series' name**, so the assumption
-  travels with the numbers.
+  power law and **says so in the returned series' name**.
 - `air_density` returns `rho` with pressure and `rho_no_pressure` without.
 
 A worked example, because the answer is not the one people expect. Shenzhen
 (22.5°N), first week of June, panels tilted 22° and facing south:
 
 ```
-倾斜面/水平面 总量比 0.954
+倾斜面/水平面 总量比 0.954      # tilted / horizontal total
 ```
 
 **The tilted plane collects four and a half per cent less than a horizontal
 one.** In June at this latitude the sun passes nearly overhead, so tilting south
-tilts the panel away from it. A tilt chosen for the annual total is the wrong
-tilt for the summer months, and a yield estimate that assumes tilting always
-helps is wrong in the direction that flatters the project. The same call for the
-first week of December returns **1.250** — the same panel, the same site, a
-thirty-point swing.
+tilts the panel away from it. The same call for the first week of December
+returns **1.250** — the same panel, the same site, a thirty-point swing.
 
-## When the point API runs out: raw files, one message at a time
+## Raw forecast files, one message at a time
 
-Point APIs have two ceilings. The archives that serve forecasts **at a stated
-lead** let a few stations through an hour, so a twelve-station study waits days
-for data that is already public. And a point API serves the variables it chose
-to serve — ask for a level or a model it does not carry and there is no request
-to make.
-
-ECMWF and NOAA both publish every run to S3 with a sidecar index giving the byte
-offset of every message inside the file. One 100 m wind field is **1.4 MB inside
-a 146 MB file**, so a range request fetches one per cent of the bytes, with no
-quota at all.
+ECMWF and NOAA publish every run to S3 with a sidecar index giving the byte
+offset of every message. One 100 m wind field is **1.4 MB inside a 146 MB
+file**, so a range request fetches one per cent of the bytes, with no quota.
 
 ```python
 from cube.sources import opendata
@@ -135,41 +130,25 @@ opendata.series("ifs", "2026-09-20 00:00", "ws100", lat=22.54, lon=114.06,
 ```
 
 Three models: `ifs`, `aifs` (ECMWF's machine-learned model) and `gfs`. **The lead
-is in the file's name**, so it cannot drift — which is the property a
-verification study needs and the one a "latest available" archive cannot give.
+is in the file's name**, so it cannot drift. What the raw files ask in return:
 
-What the raw files ask in return is that nothing is done for you, and each of
-those things is a number that comes out plausible and wrong:
-
-- The file says `m s**-1` and `K`. Both are normalised and converted explicitly,
-  and a unit with no conversion defined is refused rather than passed through.
+- Units are normalised and converted explicitly (`m s**-1`, `K`); a unit with no
+  conversion defined is refused.
 - **ECMWF's irradiance is joules accumulated since the start of the forecast**;
-  GFS's is watts averaged over a window. Taking either as an instantaneous flux
-  is wrong by a factor of thousands, and it looks merely large at step 1. Here
-  `ghi` is differenced between steps and divided by the seconds between them;
-  GFS irradiance is **refused** rather than guessed at, because its averaging
-  window is a different question and is not implemented.
-- A 0.25° grid has no point at your site. The distance to the one it used
-  travels with every row, and a request whose nearest cell is more than 40 km
-  away is refused instead of being passed off as the site.
+  here `ghi` is differenced between steps and divided by the seconds between
+  them. GFS irradiance is **refused** — its averaging window is a different
+  question and is not implemented.
+- The distance to the grid point used travels with every row; a nearest cell
+  more than 40 km away is refused.
 - NOAA's index gives only where each message starts, so its length is the next
-  message's start. Off by one entry and the range returns bytes that begin with
-  `GRIB` and end mid-field — which sometimes decodes.
+  message's start — off by one and the bytes still begin with `GRIB`.
 
-Needs a GRIB decoder, which is why it is an extra: `pip install
-"cn-weather-cube[opendata]"`.
-
-**Where this does not help, which is worth knowing before reaching for it.** A
-message is one field over the whole globe and cannot be subsetted spatially, so
-the cost scales with how many *times* you want, not how many sites. An hourly
-series at one lead, for one model and one variable over eighteen months, is
-13,176 messages — **18 GB**. Five leads is 90 GB; four models and two variables
-is 721 GB. The same thing through the point archive is one request per site.
-
-So this is not a way around the quota for a long hourly backfill. It is the way
-to get what the point archive does not carry at all: a model it does not serve,
-a level it does not offer, a field it never exposed — and a forward-looking daily
-collection of a few fields, where the count of messages stays small.
+**Where this does not help.** A message is one field over the whole globe, so
+cost scales with the number of *times*, not sites. One model, one variable, one
+lead, hourly over eighteen months is 13,176 messages — **18 GB**; five leads is
+90 GB; four models and two variables is 721 GB. It is not a way around the
+quota for a long backfill; it is the way to get a model, level or field the
+point archive does not carry.
 
 ## Missing values, substitutes and fallbacks
 
@@ -192,14 +171,11 @@ value as
   series from the other endpoint when the first fails and marks it
   `"openmeteo.forecast;fallback_from=openmeteo.archive"`. A unit refusal is never
   routed around, and gaps are never patched from a second source.
-- **`nominal_at` and `observed_at` are separate, and `interval` says why.** The
-  first is the hourly slot. `interval` is `instant`, `preceding_mean`,
-  `following_mean`, `preceding_sum` or `unknown`, with `window` (e.g. `PT1H`).
-  `observed_at` is `nominal_at` for an instant and the middle of the window for a
-  mean (null for a gap). Open-Meteo's plain radiation fields are the mean of the
-  hour *before* the label, so the 12:00 value is observed at 11:30; read as the
-  12:00 value it puts sunrise half an hour late, and joined to SMARD (hourly
-  means labelled at the start of the hour) a full hour late. `ghi`/`dni`/`dhi`
+- **`nominal_at` and `observed_at` are separate, and `interval` says why.**
+  `interval` is `instant`, `preceding_mean`, `following_mean`, `preceding_sum` or
+  `unknown`, with `window` (e.g. `PT1H`). Open-Meteo's plain radiation fields are
+  the mean of the hour *before* the label, so the 12:00 value is observed at
+  11:30; read as the 12:00 value it puts sunrise half an hour late. `ghi`/`dni`/`dhi`
   are therefore fetched as Open-Meteo's `_instant` fields by default;
   `--irradiance preceding_mean` asks for the hourly means and labels them so.
   Contract `point-weather/2` (`/1` lacked `interval`/`window` and claimed gridded
@@ -209,59 +185,50 @@ value as
 ## Caching
 
 Keyed on a hash of the whole request — source, coordinates, dates, variables,
-model list and lead. Anything that would change the data changes the key, so
-adding a model cannot serve you the file from before you added it. The request
-is written as JSON beside each file, so a cache directory is readable six months
-later without reversing a hash.
-
-Location: `$CN_WEATHER_CUBE_CACHE`, default `~/.cache/cn-weather-cube`.
-
-## Install
-
-```bash
-pip install -e .              # core: pandas, pyarrow, numpy
-pip install -e '.[features]'  # + pvlib, for the renewable-energy features
-pip install -e '.[area]'      # + xarray/zarr/gcsfs, for ARCO-ERA5
-```
+model list and lead — so adding a model cannot serve you the file from before you
+added it. The request is written as JSON beside each file. Location:
+`$CN_WEATHER_CUBE_CACHE`, default `~/.cache/cn-weather-cube`.
 
 ## Limits, stated rather than discovered
 
-- **Open-Meteo is a free shared service with a daily quota.** A broad search —
-  hundreds of candidate points over a multi-year window — will exhaust it, and
-  the failure is an HTTP 429 halfway through. Requests here back off hard on
-  429 rather than retrying into the wall, but the quota is still the binding
-  constraint on anything wide. Ask for the shortest window that answers the
-  question.
+- **Open-Meteo is a free shared service with a daily quota.** A broad search
+  will exhaust it, and the failure is an HTTP 429 halfway through. Requests back
+  off hard on 429, but ask for the shortest window that answers the question.
 - **The Chinese operational models are not in here.** CMA-GFS and CMA-MESO grids
   are not open to individuals; what can be used commercially is ECMWF Open Data,
   GFS, AIFS and ERA5 under CC BY 4.0 / Copernicus terms. CMA station
   observations need a licence.
 - **Providing weather services commercially in China requires filing with the
   provincial meteorological bureau**, and reselling CMA data has separate
-  restrictions. This package fetches public data for your own use; it does not
-  make you a licensed provider.
+  restrictions. This package fetches public data for your own use.
 - **A reanalysis is not an observation.** ERA5 at 100 m is a model field, and
   scoring a forecast against it mostly measures how close that forecast is to
-  ECMWF's own analysis. Where this matters the package labels the source rather
-  than leaving the word "truth" to do the work.
+  ECMWF's own analysis. The package labels the source rather than leaving the
+  word "truth" to do the work.
 
 ## Layout
 
 ```
 cube/
-  schema.py            variables, units, and the refusal when they do not match
-  api.py               fetch(), and which source answers which question
-  contract.py          value|null, unit, observed_at, nominal_at, interval, window, source, qc_flag
-  cache.py             request-hashed local cache
-  features.py          POA irradiance, hub wind, air density, clear-sky index
-  cli.py               cube fetch / verify / sources / vars
+  schema.py      variables, units, and the refusal when they do not match
+  api.py         fetch(), and which source answers which question
+  contract.py    value|null, unit, observed_at, nominal_at, interval, window, source, qc_flag
+  cache.py       request-hashed local cache
+  features.py    POA irradiance, hub wind, air density, clear-sky index
+  cli.py         cube fetch / verify / sources / vars
   sources/
-    openmeteo.py       archive, forecast, fixed-lead, satellite, elevation
-    arco_era5.py       Zarr, for areas and pressure levels (optional extra)
-tests/                 42 tests, none of which touch the network
+    openmeteo.py   archive, forecast, fixed-lead, satellite, elevation
+    opendata.py    ECMWF / NOAA raw files by byte range (optional extra)
+    arco_era5.py   Zarr, for areas and pressure levels (optional extra)
+tests/           no test touches the network — `pytest`
 ```
 
 ## Related repositories
 
 - [aiwp-china-verification](https://github.com/JoooDev-TPP/aiwp-china-verification) — fixed-lead verification of physics and AI weather models at Chinese stations
 - [green-ai-ledger](https://github.com/JoooDev-TPP/green-ai-ledger) — compute energy and carbon, with the grid factor pinned rather than guessed
+
+## License
+
+Code: MIT. Data fetched through this package carries its source's terms
+(CC BY 4.0 / Copernicus terms — see Limits).
